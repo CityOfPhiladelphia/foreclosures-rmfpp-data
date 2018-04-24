@@ -1,26 +1,30 @@
 import json
 import csv
 import sys
+import io
 
 import petl as etl
 import requests
 from openpyxl import load_workbook
 import shapely
 from shapely.geometry import shape, Point
-
+print("Requesting docket...")
 r = requests.get("http://docket.philalegal.org/data/foreclosure-addresses.xlsx")
+print("Request complete!")
 wb = load_workbook(io.BytesIO(r.content))
 sh = wb.active
-with open('saved_homes.csv', 'w') as f:  # open('test.csv', 'w', newline="") for python 3
+print("Writing docket to csv...")
+with open('saved_homes.csv', 'w') as f:
     c = csv.writer(f)
     for k in sh.rows:
-        allCells = []
+        all_cells = []
         for cell in k:
-            allCells.append(cell.value)
-        c.writerow(allCells)
-
-tdata = requests.get("https://phl.carto.com/api/v2/sql?q=select%20*%20from%20census_tracts_2010&format=geojson")
-tract_data = json.loads(tdata.content)
+            all_cells.append(cell.value)
+        c.writerow(all_cells)
+print("File complete!")
+print("Requesting carto files...")
+t_data = requests.get("https://phl.carto.com/api/v2/sql?q=select%20*%20from%20census_tracts_2010&format=geojson")
+tract_data = json.loads(t_data.content)
 geo = {}
 
 for feature in tract_data['features']:
@@ -28,12 +32,11 @@ for feature in tract_data['features']:
     name = feature['properties']['namelsad10']
     geo[name] = region
 
-zdata = requests.get("https://phl.carto.com/api/v2/sql?q=select%20*%20from%20zip_codes&format=geojson")
-zip_data = json.loads(zdata.content)
+z_data = requests.get("https://phl.carto.com/api/v2/sql?q=select%20*%20from%20zip_codes&format=geojson")
+zip_data = json.loads(z_data.content)
+print("Requests complete!")
 
-
-
-def addRows(q_geo,fieldName,input,output):
+def addRows(q_geo,field_name,input,output):
     with open(input) as file:
         f = open(output,'w')
         reader = csv.reader(file)
@@ -43,11 +46,10 @@ def addRows(q_geo,fieldName,input,output):
         for row in reader:
             outrow = list(row)
             if outrow[0] == "indexno":
-                outrow.append(fieldName)
+                outrow.append(field_name)
             elif outrow[8] != "" and outrow[7] != "":
                 point = Point(float(outrow[8]), float(outrow[7]))
                 found = False
-
                 for name, region in q_geo.items():
                     if point.within(region):
                         found = True
@@ -56,111 +58,111 @@ def addRows(q_geo,fieldName,input,output):
                 # if not found:
             writer.writerow(outrow)
         f.close()
-
+print("Creating new csv...")
 addRows(geo,'tract','saved_homes.csv','saved_homes_extended.csv')
-
+print("New csv created.")
 table = etl.fromcsv('saved_homes_extended.csv')
-zipLst = []
-tractLst = []
-yearLst = []
-
+zip_list = []
+tract_list = []
+year_list = []
+print("Aggregating by zip...")
 for feature in zip_data['features']:
-    zipTable = etl.select(table, 'zip', lambda x: x == feature['properties']['code'])
-    zipData = etl.data(zipTable)
-    zipDataLst = list(zipData)
-    zipDict = {'zip' : feature['properties']['code'], 'saved' : 0, 'lost' : 0, 'saved_fta' : 0, 'lost_fta' : 0, 'pending' : 0, 'pending_fta' : 0, 'vacant' : 0, 'nonowner' : 0, 'litig/bankr' : 0, 'litig/bankr_fta' : 0, 'shape' : feature['geometry']}
-    for b in zipDataLst:
+    zip_table = etl.select(table, 'zip', lambda x: x == feature['properties']['code'])
+    zip_data = etl.data(zip_table)
+    zip_data_list = list(zip_data)
+    zip_dict = {'zip' : feature['properties']['code'], 'saved' : 0, 'lost' : 0, 'saved_fta' : 0, 'lost_fta' : 0, 'pending' : 0, 'pending_fta' : 0, 'vacant' : 0, 'nonowner' : 0, 'litig/bankr' : 0, 'litig/bankr_fta' : 0, 'shape' : feature['geometry']}
+    for b in zip_data_list:
             if b[1] == 'Saved':
-                zipDict['saved'] = zipDict['saved'] + 1
+                zip_dict['saved'] = zip_dict['saved'] + 1
             elif b[1] == 'Lost':
-                zipDict['lost'] = zipDict['lost'] + 1
+                zip_dict['lost'] = zip_dict['lost'] + 1
             elif b[1] == 'Saved - FTA':
-                zipDict['saved_fta'] = zipDict['saved_fta'] + 1
+                zip_dict['saved_fta'] = zip_dict['saved_fta'] + 1
             elif b[1] == 'Lost - FTA':
-                zipDict['lost_fta'] = zipDict['lost_fta'] + 1
+                zip_dict['lost_fta'] = zip_dict['lost_fta'] + 1
             elif b[1] == 'Pending':
-                zipDict['pending'] = zipDict['pending'] + 1
+                zip_dict['pending'] = zip_dict['pending'] + 1
             elif b[1] == 'Pending - FTA':
-                zipDict['pending_fta'] = zipDict['pending_fta'] + 1
+                zip_dict['pending_fta'] = zip_dict['pending_fta'] + 1
             elif b[1] == 'Vacant':
-                zipDict['vacant'] = zipDict['vacant'] + 1
+                zip_dict['vacant'] = zip_dict['vacant'] + 1
             elif b[1] == 'Nonowner':
-                zipDict['nonowner'] = zipDict['nonowner'] + 1
+                zip_dict['nonowner'] = zip_dict['nonowner'] + 1
             elif b[1] == 'Litig/Bankr':
-                zipDict['litig/bankr'] = zipDict['litig/bankr'] + 1
+                zip_dict['litig/bankr'] = zip_dict['litig/bankr'] + 1
             elif b[1] == 'Litig/Bankr - FTA':
-                zipDict['litig/bankr_fta'] = zipDict['litig/bankr_fta'] + 1
-    if len(zipDataLst) != 0:
-        zipLst.append(zipDict)
+                zip_dict['litig/bankr_fta'] = zip_dict['litig/bankr_fta'] + 1
+    zip_list.append(zip_dict)
 
 with open('zip_aggregate.csv','w') as file:
-    dict_writer = csv.DictWriter(file,zipLst[0].keys())
+    dict_writer = csv.DictWriter(file,zip_list[0].keys())
     dict_writer.writeheader()
-    dict_writer.writerows(zipLst)
-
+    dict_writer.writerows(zip_list)
+print("Aggregation complete!")
+print("Aggregating by tract...")
 for feature in tract_data['features']:
-    tractTable = etl.select(table, 'tract', lambda x: x == feature['properties']['namelsad10'])
-    tractData = etl.data(tractTable)
-    tractDataLst = list(tractData)
-    tractDict = {'tract' : feature['properties']['namelsad10'], 'saved' : 0, 'lost' : 0, 'saved_fta' : 0, 'lost_fta' : 0, 'pending' : 0, 'pending_fta' : 0, 'vacant' : 0, 'nonowner' : 0, 'litig/bankr' : 0, 'litig/bankr_fta' : 0, 'shape' : feature['geometry']}
-    for b in tractDataLst:
-            if b[1] == 'Saved':
-                tractDict['saved'] = tractDict['saved'] + 1
-            elif b[1] == 'Lost':
-                tractDict['lost'] = tractDict['lost'] + 1
-            elif b[1] == 'Saved - FTA':
-                tractDict['saved_fta'] = tractDict['saved_fta'] + 1
-            elif b[1] == 'Lost - FTA':
-                tractDict['lost_fta'] = tractDict['lost_fta'] + 1
-            elif b[1] == 'Pending':
-                tractDict['pending'] = tractDict['pending'] + 1
-            elif b[1] == 'Pending - FTA':
-                tractDict['pending_fta'] = tractDict['pending_fta'] + 1
-            elif b[1] == 'Vacant':
-                tractDict['vacant'] = tractDict['vacant'] + 1
-            elif b[1] == 'Nonowner':
-                tractDict['nonowner'] = tractDict['nonowner'] + 1
-            elif b[1] == 'Litig/Bankr':
-                tractDict['litig/bankr'] = tractDict['litig/bankr'] + 1
-            elif b[1] == 'Litig/Bankr - FTA':
-                zipDict['litig/bankr_fta'] = zipDict['litig/bankr_fta'] + 1
-    tractLst.append(tractDict)
+    tract_table = etl.select(table, 'tract', lambda x: x == feature['properties']['namelsad10'])
+    tract_data = etl.data(tract_table)
+    tract_data_list = list(tract_data)
+    tract_dict = {'tract' : feature['properties']['namelsad10'], 'saved' : 0, 'lost' : 0, 'saved_fta' : 0, 'lost_fta' : 0, 'pending' : 0, 'pending_fta' : 0, 'vacant' : 0, 'nonowner' : 0, 'litig/bankr' : 0, 'litig/bankr_fta' : 0, 'shape' : feature['geometry']}
+    for b in tract_data_list:
+        if b[1] == 'Saved':
+            tract_dict['saved'] = tract_dict['saved'] + 1
+        elif b[1] == 'Lost':
+            tract_dict['lost'] = tract_dict['lost'] + 1
+        elif b[1] == 'Saved - FTA':
+            tract_dict['saved_fta'] = tract_dict['saved_fta'] + 1
+        elif b[1] == 'Lost - FTA':
+            tract_dict['lost_fta'] = tract_dict['lost_fta'] + 1
+        elif b[1] == 'Pending':
+            tract_dict['pending'] = tract_dict['pending'] + 1
+        elif b[1] == 'Pending - FTA':
+            tract_dict['pending_fta'] = tract_dict['pending_fta'] + 1
+        elif b[1] == 'Vacant':
+            tract_dict['vacant'] = tract_dict['vacant'] + 1
+        elif b[1] == 'Nonowner':
+            tract_dict['nonowner'] = tract_dict['nonowner'] + 1
+        elif b[1] == 'Litig/Bankr':
+            tract_dict['litig/bankr'] = tract_dict['litig/bankr'] + 1
+        elif b[1] == 'Litig/Bankr - FTA':
+            zip_dict['litig/bankr_fta'] = zip_dict['litig/bankr_fta'] + 1
+    tract_list.append(tract_dict)
 
 with open('tract_aggregate.csv','w') as file:
-    dict_writer = csv.DictWriter(file,tractLst[0].keys())
+    dict_writer = csv.DictWriter(file,tract_list[0].keys())
     dict_writer.writeheader()
-    dict_writer.writerows(tractLst)
-
+    dict_writer.writerows(tract_list)
+print("Aggregation complete!")
+print("Aggregating by year...")
 for i in range(2008,2032):
-    yearTable = etl.select(table, 'maxdate', lambda x: x[0:4] == str(i))
-    yearData = etl.data(yearTable)
-    yearDataLst = list(yearData)
-    yearDict = {'year' : i, 'saved' : 0, 'lost' : 0, 'saved_fta' : 0, 'lost_fta' : 0, 'pending' : 0, 'pending_fta' : 0, 'vacant' : 0, 'nonowner' : 0, 'litig/bankr' : 0, 'litig/bankr_fta' : 0}
-    for b in yearDataLst:
+    year_table = etl.select(table, 'maxdate', lambda x: x[0:4] == str(i))
+    year_data = etl.data(year_table)
+    year_data_list = list(year_data)
+    year_dict = {'year' : i, 'saved' : 0, 'lost' : 0, 'saved_fta' : 0, 'lost_fta' : 0, 'pending' : 0, 'pending_fta' : 0, 'vacant' : 0, 'nonowner' : 0, 'litig/bankr' : 0, 'litig/bankr_fta' : 0}
+    for b in year_data_list:
         if b[1] == 'Saved':
-            yearDict['saved'] = yearDict['saved'] + 1
+            year_dict['saved'] = year_dict['saved'] + 1
         elif b[1] == 'Lost':
-            yearDict['lost'] = yearDict['lost'] + 1
+            year_dict['lost'] = year_dict['lost'] + 1
         elif b[1] == 'Saved - FTA':
-            yearDict['saved_fta'] = yearDict['saved_fta'] + 1
+            year_dict['saved_fta'] = year_dict['saved_fta'] + 1
         elif b[1] == 'Lost - FTA':
-            yearDict['lost_fta'] = yearDict['lost_fta'] + 1
+            year_dict['lost_fta'] = year_dict['lost_fta'] + 1
         elif b[1] == 'Pending':
-            yearDict['pending'] = yearDict['pending'] + 1
+            year_dict['pending'] = year_dict['pending'] + 1
         elif b[1] == 'Pending - FTA':
-            yearDict['pending_fta'] = yearDict['pending_fta'] + 1
+            year_dict['pending_fta'] = year_dict['pending_fta'] + 1
         elif b[1] == 'Vacant':
-            yearDict['vacant'] = yearDict['vacant'] + 1
+            year_dict['vacant'] = year_dict['vacant'] + 1
         elif b[1] == 'Nonowner':
-            yearDict['nonowner'] = yearDict['nonowner'] + 1
+            year_dict['nonowner'] = year_dict['nonowner'] + 1
         elif b[1] == 'Litig/Bankr':
-            yearDict['litig/bankr'] = yearDict['litig/bankr'] + 1
+            year_dict['litig/bankr'] = year_dict['litig/bankr'] + 1
         elif b[1] == 'Litig/Bankr - FTA':
-            zipDict['litig/bankr_fta'] = zipDict['litig/bankr_fta'] + 1
-    if len(yearDataLst) != 0:
-        yearLst.append(yearDict)
-
+            zip_dict['litig/bankr_fta'] = zip_dict['litig/bankr_fta'] + 1
+    year_list.append(year_dict)
 with open('year_aggregate.csv','w') as file:
-    dict_writer = csv.DictWriter(file,yearLst[0].keys())
+    dict_writer = csv.DictWriter(file,year_list[0].keys())
     dict_writer.writeheader()
-    dict_writer.writerows(yearLst)
+    dict_writer.writerows(year_list)
+print("Aggregation complete!")
