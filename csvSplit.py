@@ -1,5 +1,4 @@
 import json
-import io
 import csv
 import sys
 
@@ -10,7 +9,6 @@ import shapely
 from shapely.geometry import shape, Point
 
 r = requests.get("http://docket.philalegal.org/data/foreclosure-addresses.xlsx")
-print("Got request")
 wb = load_workbook(io.BytesIO(r.content))
 sh = wb.active
 with open('saved_homes.csv', 'w') as f:  # open('test.csv', 'w', newline="") for python 3
@@ -21,27 +19,17 @@ with open('saved_homes.csv', 'w') as f:  # open('test.csv', 'w', newline="") for
             allCells.append(cell.value)
         c.writerow(allCells)
 
-#og_csv = etl.fromcsv('saved_homes.csv')
-f = io.open('tract.geojson','r',encoding='utf-8-sig')
-#k = io.open('cb_2017_42_bg_500k.json','r',encoding='utf-8-sig')
-tdata = f.read()
-#bdata = k.read()
-tract_data = json.loads(tdata)
-#block_data = json.loads(bdata)
-# lon = etl.values(og_csv, 'longitude')
-# lat = etl.values(og_csv, 'latitude')
+tdata = requests.get("https://phl.carto.com/api/v2/sql?q=select%20*%20from%20census_tracts_2010&format=geojson")
+tract_data = json.loads(tdata.content)
 geo = {}
-#bl_geo = {}
 
 for feature in tract_data['features']:
     region = shape(feature['geometry'])
-    name = feature['properties']['NAMELSAD10']
+    name = feature['properties']['namelsad10']
     geo[name] = region
 
-#for feature in block_data['features']:
-#    region = shape(feature['geometry'])
-#    name = feature['properties']['NAME']
-#    bl_geo[name] = region
+zdata = requests.get("https://phl.carto.com/api/v2/sql?q=select%20*%20from%20zip_codes&format=geojson")
+zip_data = json.loads(zdata.content)
 
 
 
@@ -70,21 +58,17 @@ def addRows(q_geo,fieldName,input,output):
         f.close()
 
 addRows(geo,'tract','saved_homes.csv','saved_homes_extended.csv')
-#addRows(bl_geo,'block_group','saved_homes_extended.csv','saved_homes_extended2.csv')
-
 
 table = etl.fromcsv('saved_homes_extended.csv')
 zipLst = []
-
-f = io.open('Zipcodes_Poly.geojson','r',encoding='utf-8-sig')
-zdata = f.read()
-zip_data = json.loads(zdata)
+tractLst = []
+yearLst = []
 
 for feature in zip_data['features']:
-    zipTable = etl.select(table, 'zip', lambda x: x == feature['properties']['CODE'])
+    zipTable = etl.select(table, 'zip', lambda x: x == feature['properties']['code'])
     zipData = etl.data(zipTable)
     zipDataLst = list(zipData)
-    zipDict = {'zip' : feature['properties']['CODE'], 'saved' : 0, 'lost' : 0, 'saved_fta' : 0, 'lost_fta' : 0, 'pending' : 0, 'pending_fta' : 0, 'vacant' : 0, 'nonowner' : 0, 'litig/bankr' : 0, 'shape' : feature['geometry']}
+    zipDict = {'zip' : feature['properties']['code'], 'saved' : 0, 'lost' : 0, 'saved_fta' : 0, 'lost_fta' : 0, 'pending' : 0, 'pending_fta' : 0, 'vacant' : 0, 'nonowner' : 0, 'litig/bankr' : 0, 'litig/bankr_fta' : 0, 'shape' : feature['geometry']}
     for b in zipDataLst:
             if b[1] == 'Saved':
                 zipDict['saved'] = zipDict['saved'] + 1
@@ -104,6 +88,8 @@ for feature in zip_data['features']:
                 zipDict['nonowner'] = zipDict['nonowner'] + 1
             elif b[1] == 'Litig/Bankr':
                 zipDict['litig/bankr'] = zipDict['litig/bankr'] + 1
+            elif b[1] == 'Litig/Bankr - FTA':
+                zipDict['litig/bankr_fta'] = zipDict['litig/bankr_fta'] + 1
     if len(zipDataLst) != 0:
         zipLst.append(zipDict)
 
@@ -112,16 +98,11 @@ with open('zip_aggregate.csv','w') as file:
     dict_writer.writeheader()
     dict_writer.writerows(zipLst)
 
-f = io.open('tract.geojson','r',encoding='utf-8-sig')
-tdata = f.read()
-tract_data = json.loads(tdata)
-tractLst = []
-
 for feature in tract_data['features']:
-    tractTable = etl.select(table, 'tract', lambda x: x == feature['properties']['NAMELSAD10'])
+    tractTable = etl.select(table, 'tract', lambda x: x == feature['properties']['namelsad10'])
     tractData = etl.data(tractTable)
     tractDataLst = list(tractData)
-    tractDict = {'tract' : feature['properties']['NAMELSAD10'], 'saved' : 0, 'lost' : 0, 'saved_fta' : 0, 'lost_fta' : 0, 'pending' : 0, 'pending_fta' : 0, 'vacant' : 0, 'nonowner' : 0, 'litig/bankr' : 0, 'shape' : feature['geometry']}
+    tractDict = {'tract' : feature['properties']['namelsad10'], 'saved' : 0, 'lost' : 0, 'saved_fta' : 0, 'lost_fta' : 0, 'pending' : 0, 'pending_fta' : 0, 'vacant' : 0, 'nonowner' : 0, 'litig/bankr' : 0, 'litig/bankr_fta' : 0, 'shape' : feature['geometry']}
     for b in tractDataLst:
             if b[1] == 'Saved':
                 tractDict['saved'] = tractDict['saved'] + 1
@@ -141,6 +122,8 @@ for feature in tract_data['features']:
                 tractDict['nonowner'] = tractDict['nonowner'] + 1
             elif b[1] == 'Litig/Bankr':
                 tractDict['litig/bankr'] = tractDict['litig/bankr'] + 1
+            elif b[1] == 'Litig/Bankr - FTA':
+                zipDict['litig/bankr_fta'] = zipDict['litig/bankr_fta'] + 1
     tractLst.append(tractDict)
 
 with open('tract_aggregate.csv','w') as file:
@@ -148,13 +131,11 @@ with open('tract_aggregate.csv','w') as file:
     dict_writer.writeheader()
     dict_writer.writerows(tractLst)
 
-
-yearLst = []
 for i in range(2008,2032):
     yearTable = etl.select(table, 'maxdate', lambda x: x[0:4] == str(i))
     yearData = etl.data(yearTable)
     yearDataLst = list(yearData)
-    yearDict = {'year' : i, 'saved' : 0, 'lost' : 0, 'saved_fta' : 0, 'lost_fta' : 0, 'pending' : 0, 'pending_fta' : 0, 'vacant' : 0, 'nonowner' : 0, 'litig/bankr' : 0}
+    yearDict = {'year' : i, 'saved' : 0, 'lost' : 0, 'saved_fta' : 0, 'lost_fta' : 0, 'pending' : 0, 'pending_fta' : 0, 'vacant' : 0, 'nonowner' : 0, 'litig/bankr' : 0, 'litig/bankr_fta' : 0}
     for b in yearDataLst:
         if b[1] == 'Saved':
             yearDict['saved'] = yearDict['saved'] + 1
@@ -174,9 +155,10 @@ for i in range(2008,2032):
             yearDict['nonowner'] = yearDict['nonowner'] + 1
         elif b[1] == 'Litig/Bankr':
             yearDict['litig/bankr'] = yearDict['litig/bankr'] + 1
+        elif b[1] == 'Litig/Bankr - FTA':
+            zipDict['litig/bankr_fta'] = zipDict['litig/bankr_fta'] + 1
     if len(yearDataLst) != 0:
         yearLst.append(yearDict)
-
 
 with open('year_aggregate.csv','w') as file:
     dict_writer = csv.DictWriter(file,yearLst[0].keys())
