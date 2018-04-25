@@ -40,8 +40,6 @@ def addRows(q_geo,field_name,input,output):
     with open(input) as file:
         f = open(output,'w')
         reader = csv.reader(file)
-        # skip headers
-        # next(reader)
         writer = csv.writer(f)
         for row in reader:
             outrow = list(row)
@@ -49,13 +47,10 @@ def addRows(q_geo,field_name,input,output):
                 outrow.append(field_name)
             elif outrow[8] != "" and outrow[7] != "":
                 point = Point(float(outrow[8]), float(outrow[7]))
-                found = False
                 for name, region in q_geo.items():
                     if point.within(region):
-                        found = True
                         outrow.append(name)
                         break
-                # if not found:
             writer.writerow(outrow)
         f.close()
 print("Creating new csv...")
