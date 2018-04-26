@@ -1,1 +1,1 @@
-This will be filled in later
+Used for the creation of aggregates of Homes Saved data.
